@@ -1,0 +1,17 @@
+Package: EAtestslite
+Type: Package
+Title: Enrichment analysis package
+Version: 1.8
+Date: 2017-02-01
+Author: Francesco Bettella (loosely based on Andrew Schork's history files)
+Maintainer: Who to complain to <francesco.bettella@medisin.uio.no>
+Description: The functions provide means of testing for enrichment of some independent variable
+             (e.g. summary statistic p-value) for certain values of some annotation variable.
+             It was devised for application to different categories of SNPs in GWAS secondary
+             analyses.
+License: GPN, (G)eneral (P)ublic (N)icence One may do whatever one
+        pleases with this package. If one decides to redistribute it,
+        it would be (n)ice if the 'Author' information above was
+        somehow propagated too.
+NeedsCompilation: no
+Packaged: 2016-09-30 09:59:46 UTC; checco

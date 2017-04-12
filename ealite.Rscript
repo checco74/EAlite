@@ -1,0 +1,652 @@
+#!/usr/bin/Rscript
+## ealite.Rscript - version 0.6 (February 2017)
+## an R script to perform enrichment analysis.
+## (works with EAtestslite version 1.4 or newer)
+##
+## - when interaction is requested in regression, an extra regression is run to
+##  estimate the non-interaction coefficients without any interaction terms
+
+######################## set working environment up ########################
+# library( parallel )
+# library( multicore, quietly = T, warn.conflicts = F )
+# library( foreach, quietly = T, warn.conflicts = F )
+# library( doMC, quietly = T, warn.conflicts = F )
+
+library( EAtestslite )  # for distribution
+# source( "/home/checco/lib/R/myEAtests.R" )  # for pre-distribution testing
+
+############################################################################
+
+options( "warn" = 1 )
+myargs <- commandArgs( TRUE )
+cat( "=============================================================================================\n" )
+cat( "                                    Enrichment Analysis                                      \n" )
+cat( "=============================================================================================\n" )
+
+parameters <- parse_command_line( myargs )
+
+if ( parameters$verbose ) {
+    cat( 'using R version:\n' )
+    print( version )
+}
+
+
+if ( length( parameters$pheno.files ) > 0 && !parameters$helpme ) {
+
+    filter.array = NULL
+    if ( length( parameters$filter.names ) > 0 ) {
+        cat( "reading filter arrays..\n" )
+        filter.array = c()
+        for ( filter.name in parameters$filter.names ) {
+            data.loaded <- names( attach( filter.name, pos=2, warn.conflicts=F ) )
+            filter.array = cbind( filter.array, get( data.loaded[1], pos=2 ) )
+        }
+    #     filter.array = array( filter.array, dim = dim( filter.array ) )
+    }
+
+    mybsannot = NULL
+    if ( parameters$do_draw_bs_plots ) {
+        cat( "loading scatter data set..\n" )
+        if ( parameters$expect_rdata ) {
+            data.loaded <- names( attach( parameters$bsannotation.file, pos=2, warn.conflicts=F ) )
+            mybsannot <- get( data.loaded[1], pos=2 )
+        } else {
+            tmpdata <- read.table( parameters$bsannotation.file, header = parameters$read.header )
+            mybsannot <- tmpdata[, 1 ]
+        }
+        mybsannot_bins = quantile(mybsannot, probs=seq(0, 1, by=1/parameters$N_bins), na.rm=T)
+        mybsannot_mids = aggregate(mybsannot, list(cut(mybsannot, mybsannot_bins)), mean, na.rm=T)[,2]
+    }
+
+    myctrlannot = NULL
+    if ( parameters$ctrlannotation.file != "" ) {
+        cat( "loading control data set..\n" )
+        if ( parameters$expect_rdata ) {
+            data.loaded <- names( attach( parameters$ctrlannotation.file, pos=2, warn.conflicts=F ) )
+            myctrlannot <- get( data.loaded[1], pos=2 )
+        } else {
+            tmpdata <- read.table( parameters$ctrlannotation.file, header = parameters$read.header )
+            myctrlannot <- tmpdata[, 1 ]
+        }
+        if ( all( is.numeric(myctrlannot) ) ) myctrlannot <- myctrlannot >= 1
+        myctrlannot <- as.numeric( myctrlannot ) == 1
+    }
+
+    mygenoctrlannot = NULL
+    if ( parameters$do_genomic_correction ) {
+        if ( file.exists( parameters$genoctrlannotation.file ) ) {
+            cat( "loading genomic control data set..\n" )
+            if ( parameters$expect_rdata ) {
+                data.loaded <- names( attach( parameters$genoctrlannotation.file, pos=2, warn.conflicts=F ) )
+                mygenoctrlannot <- get( data.loaded[1], pos=2 )
+            } else {
+                tmpdata <- read.table( parameters$genoctrlannotation.file, header = parameters$read.header )
+                mygenoctrlannot <- tmpdata[, 1 ]
+            }
+            if ( all( is.numeric(mygenoctrlannot) ) ) mygenoctrlannot <- mygenoctrlannot >= 1
+            mygenoctrlannot <- as.numeric( mygenoctrlannot ) == 1
+        } else {
+            cat( "no genomic correction list found: using all..\n" )
+        }
+        gcfilter.array = array( mygenoctrlannot, dim = c( length( mygenoctrlannot ), 1 ) )
+        if ( !is.null( filter.array ) ) {
+            gcfilter.placeholder = 1 # this is used mygenoctrlannot is NULL
+            if ( !is.null( gcfilter.array ) ) gcfilter.placeholder = gcfilter.array
+            gcfilter.array = array( gcfilter.placeholder, dim = dim( filter.array ) ) & filter.array
+        }
+    }
+
+	for ( data.file in parameters$pheno.files ) {
+
+		############################################# read data ################################################
+		cat( "=============================================================================================\n" )
+		cat( "reading data '", data.file, "'\n", sep = "" )
+		cat( "=============================================================================================\n" )
+
+        mypheno = sub( '^P_', '', sub( '(.RData|.txt)$', '', basename(data.file) ) )
+
+		if ( parameters$expect_rdata ) {
+			data.loaded <- names( attach( data.file, pos=2, warn.conflicts=F ) )
+			mydata <- get( data.loaded[1], pos=2 )
+		} else {
+            tmpdata <- read.table( data.file, header = parameters$read.header )
+            mydata <- tmpdata[, 1 ]
+        }
+        if ( length( mydata ) < 1 ) {
+            cat( "no data provided.\n" )
+            return( 0 )
+        }
+		if ( parameters$verbose )
+            cat( 'data:\n' ); print( head( mydata ) )
+		########################################################################################################
+
+        if ( parameters$do_genomic_correction ) {
+            cat( "performing genomic correction.." )
+            mydata <- gc_pval( mydata, gcfilter.array )
+            cat( "done.\n" )
+        }
+
+        if ( parameters$distr == 'e' ) {
+            cat( "computing ecdf..\n" )
+            mysrtdata <- sort( mydata[ !is.na( mydata ) ] )
+            pheno_ecdf <- ( 1 : length( mysrtdata ) ) / length( mysrtdata )
+            pheno_p <- approx( mysrtdata, pheno_ecdf, mydata[ !is.na( mydata ) ] )
+            mydata[ !is.na( mydata ) ] <- ifelse( pheno_p$y == 0, parameters$tiny, pheno_p$y )
+            png( paste( parameters$outprefix, sub( '(.RData|.txt)$', '', basename(data.file) ), "ecdf.png", sep="_" ) )
+            plot( mysrtdata, pheno_ecdf )
+            dev.off()
+            png( paste( parameters$outprefix, sub( '(.RData|.txt)$', '', basename(data.file) ), "pecdf.png", sep="_" ) )
+            plot( ecdf( pheno_ecdf ) )
+            dev.off()
+        } else {
+            # TODO check for negative entries
+            mydata = mydata / max( mydata, 1, na.rm=T )
+            mydata[ mydata == 0 ] = min( mydata[ mydata != 0 ], na.rm=T )
+        }
+
+        if ( parameters$do_draw_bs_plots ) {
+            bsplot.filename <- paste0( parameters$outprefix, '_', sub( '(.RData|.txt)$', '', basename(data.file) ), '_squaredz_vs_',
+                sub( '(.RData|.txt)$', '', basename(parameters$bsannotation.file) ), '.pdf' )
+            myresiduals_mean = array( NA, dim = c( parameters$N_bins, length( parameters$annotation.files ) ) )
+            myresiduals_var = array( NA, dim = c( parameters$N_bins, length( parameters$annotation.files ) ) )
+            pdf( bsplot.filename )
+        }
+
+        for ( annotation.file in parameters$annotation.files ) {
+
+            aj <- which( parameters$annotation.files == annotation.file )
+            cat( "---------------------------------------------------------------------------------------------\n" )
+            cat( "working on annotation file [", aj, "] '", annotation.file, "'..\n", sep = "" )
+            cat( "---------------------------------------------------------------------------------------------\n" )
+
+            annotation.name = sub( '(.RData|.txt)$', '', basename(annotation.file) )
+            while ( grepl( '^[0-9]', annotation.name ) ||
+                annotation.name %in% sub( '(.RData|.txt)$', '', basename(parameters$annotation.files[-aj]) ) )
+                        annotation.name = paste0( 'X', annotation.name )
+
+            if ( parameters$expect_rdata ) {
+                data.loaded <- names( attach( annotation.file, pos=2, warn.conflicts=F ) )
+                myannot <- get( data.loaded[1], pos=2 )
+            } else {
+                tmpdata <- read.table( annotation.file, header = parameters$read.header )
+                myannot <- tmpdata[, 1 ]
+            }
+            if ( length( myannot ) < 1 ) {
+                cat( "no annotation provided.\n" )
+                return( 0 )
+            } else if ( parameters$verbose ) {
+                cat( 'unprocessed annotation:\n' )
+                print( head( myannot ) )
+            }
+
+            parameterstmp = parameters
+            myannotq <- factorize_annotation(myannot, parameters$mybreaks, parameters$numof.breaks)
+            if ( parameters$verbose ) {
+                cat( 'factorized annotation:\n' )
+                print( head( myannotq ) )
+            }
+            N_levels <- length( levels(as.factor(myannotq)) )
+            tt = seq( 0, 1, length.out=N_levels )
+            mybasecolor = mycolorfunction(aj, length(parameters$annotation.files), parameters$figure.colors)
+            parameterstmp$figure.colors = rgb( t(col2rgb(mybasecolor)), alpha = pmax(10, tt*255), maxColorValue = 255 )
+
+            if ( parameters$do_compute_fdr ) {
+
+                cat( "==========> computing FDR..\n" )
+                fdr.spec <- paste( sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name, "FDR", sep = "_" )
+                fdr.filename <- paste( parameters$outprefix, fdr.spec, parameters$myFDR, "table.txt", sep = "_" )
+                if ( parameters$do_draw_fdr_plots ) {
+                    fdrplot.filename <- paste( parameters$outprefix, fdr.spec, "plot.pdf", sep = "_" )
+                    pdf( file = fdrplot.filename )
+                }
+                if ( parameters$verbose ) {
+                    cat( "call of compute_fdr() with arguments:\n" )
+                    cat( "fdr.file = ", fdr.filename )
+                    cat( "mydata =\n" ); print( head( mydata ) )
+                    cat( "myannot = " ); print( head( myannot ) )
+                    cat( "mybreaks = " ); print( parameters$mybreaks )
+                    cat( "numof.breaks = " ); print( parameters$numof.breaks )
+                    cat( "fdr.level = " ); print( parameters$myFDR )
+                }
+                myfdr.table <- compute_fdr( mydata, myannot, parameterstmp, myfilter = filter.array,
+                    fdr.file = fdr.filename )
+                if( parameters$do_draw_fdr_plots ) dev.off()
+
+            }
+
+            if ( parameters$do_draw_qq_plots ) {
+
+                cat( "==========> drawing QQ-plots..\n" )
+                if ( parameters$verbose ) {
+                    cat( "call of draw_qq_plots() with arguments:\n" )
+                    cat( "mydata =\n" ); print( head( mydata ) )
+                    cat( "myannot =\n" ); print( head( myannot ) )
+                    cat( "mybreaks = " ); print( parameters$mybreaks )
+                    cat( "numof.breaks = " ); print( parameters$numof.breaks )
+                }
+                pdf( file = paste( parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    'QQ.pdf', sep = "_" )
+                )
+                draw_qq_plots( mydata, myannot, parameterstmp, filter.array )
+                dev.off()
+                pdf( file = paste( parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    'QQ_fold.pdf', sep = "_" )
+                )
+                draw_fold_plots( mydata, myannot, parameterstmp, filter.array )
+                dev.off()
+                qq.filename <- paste( parameters$outprefix, sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "QQ_table.txt", sep = "_" )
+#                 write.table( qq.table, file = qq.filename, quote = F, row.names = F )
+
+            }
+
+            if ( parameters$do_estimate_enrichment ) {
+
+                cat( "==========> estimating enrichment..\n" )
+                enrichment.filename <- paste(
+                    parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "EE.txt", sep = "_"
+                )
+                enrichment.medianfilename <- paste(
+                    parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "EEmedian.txt", sep = "_"
+                )
+                enrichment.maxfilename <- paste(
+                    parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "EEmax.txt", sep = "_"
+                )
+                enrichment.minfilename <- paste(
+                    parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "EEmin.txt", sep = "_"
+                )
+                enrichment.wfilename <- paste(
+                    parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "EEw.txt", sep = "_"
+                )
+                enrichment.regfilename <- paste(
+                    parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "EEreg.png", sep = "_"
+                )
+                enrichment.diagfilename <- paste(
+                    parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "EEdiag.png", sep = "_"
+                )
+                enrichment.dumpfilename <- paste(
+                    parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "EEdump.RData", sep = "_"
+                )
+                regannotation.files =
+                    unique( c( annotation.file, parameters$covannotation.files ) )
+                regcolnames <- sub( '(.RData|.txt)$', '', basename(regannotation.files) )
+                myregannot = data.frame(
+                    array( dim = c( length( mydata ), length( regcolnames ) ) )
+                )
+                for (k in 1:length(regcolnames)) {
+                    while ( grepl( '^[0-9]', regcolnames[k] ) || regcolnames[k] %in% regcolnames[-k] )
+                        regcolnames[k] = paste0( 'X', regcolnames[k] )
+                }
+                colnames( myregannot ) <- regcolnames
+                covannotation.files = regannotation.files[ regannotation.files != annotation.file ]
+                for ( covannotation.file in covannotation.files ) {
+                    cj <- which( regannotation.files == covannotation.file )
+                    if ( cj == 1 ) {
+                        cat( 'something unexpected happened.\n' )
+                        cat( 'the first covariate should be the covariate of interest.\n' )
+                        cat( '"..that was definitely the same cat." [ind. cit.]\n' )
+                        return(0)
+                    }
+                    if ( parameters$expect_rdata ) {
+                        data.loaded <- names( attach( covannotation.file, pos=2, warn.conflicts=F ) )
+                        myregannot[, cj ] <- get( data.loaded[1], pos=2 )
+                    } else {
+                        tmpdata <- read.table( covannotation.file, header = parameters$read.header )
+                        myregannot[, cj ] <- tmpdata[, 1 ]
+                    }
+                }
+                myregannot[, 1 ] <- myannot
+                if ( parameters$verbose ) {
+                    cat( "call of estimate_enrichment() with arguments:\n" )
+                    cat( "mydata =\n" ); print( head( mydata ) )
+                    cat( "myregannot =\n" ); print( head( myregannot ) )
+                    cat( "mybreaks = " ); print( parameters$mybreaks )
+                    cat( "numof.breaks = " ); print( parameters$numof.breaks )
+                    cat( "interact = " ); print( parameters$interact )
+                }
+                if( dim( myregannot )[2] > 0 ) {
+                    myenrichmentmean.table = c()
+                    myenrichmentmedian.table = c()
+                    myenrichmentmax.table = c()
+                    myenrichmentmin.table = c()
+                    myenrichment.list <- estimate_enrichment( mydata, myctrlannot, myregannot, parameters,
+                        filter.array, mybsannot, enrichment.diagfilename, enrichment.dumpfilename )
+                    if ( !is.null( myenrichment.list ) ) {
+                        mycolnames <- colnames( myenrichment.list$regmean )
+                        mycolnames[1] <- paste( "reg", mycolnames[1] )
+                        myrownames <- rownames( myenrichment.list$regmean )
+                        myenrichment <- myenrichment.list$regmean
+                        myenrichmentmean.table <- matrix( myenrichment, dimnames = list( myrownames, mycolnames ),
+                            ncol = length( mycolnames ) )
+                        myenrichment <- myenrichment.list$regmedian
+                        myenrichmentmedian.table <- matrix( myenrichment, dimnames = list( myrownames, mycolnames ),
+                            ncol = length( mycolnames ) )
+                        myenrichment <- myenrichment.list$regmax
+                        myenrichmentmax.table <- matrix( myenrichment, dimnames = list( myrownames, mycolnames ),
+                            ncol = length( mycolnames ) )
+                        myenrichment <- myenrichment.list$regmin
+                        myenrichmentmin.table <- matrix( myenrichment, dimnames = list( myrownames, mycolnames ),
+                            ncol = length( mycolnames ) )
+                        myenrichment <- myenrichment.list$regwmean
+                        myenrichmentwmean.table <- matrix( myenrichment, dimnames = list( myrownames, mycolnames ),
+                            ncol = length( mycolnames ) )
+                        if ( parameters$verbose ) {
+                            cat( 'residuals:\n' )
+                            print( myenrichment.list$resmean )
+                        }
+                        if ( parameters$do_draw_bs_plots ) {
+                            myresiduals_mean[,aj] <- myenrichment.list$resmean
+                            myresiduals_var[,aj] <- myenrichment.list$resvar
+                        }
+                    }
+                    write.table( myenrichmentmean.table, file = enrichment.filename, quote = F, na = "-" )
+                    write.table( myenrichmentmedian.table, file = enrichment.medianfilename, quote = F, na = "-" )
+                    write.table( myenrichmentmax.table, file = enrichment.maxfilename, quote = F, na = "-" )
+                    write.table( myenrichmentmin.table, file = enrichment.minfilename, quote = F, na = "-" )
+                    write.table( myenrichmentwmean.table, file = enrichment.wfilename, quote = F, na = "-" )
+                }
+
+            }
+
+            if ( parameters$do_perform_bpt ) {
+
+                pdf( paste( parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "BPT.pdf", sep = "_" ) )
+                par( mar = c( 5, 5, 5, 2 ) )
+                # set plot area up
+                plot( NULL,
+                    cex = 1.5,
+                    xaxt = "n", yaxt = "n",
+                    xlab = "", ylab = "",
+                    xlim = log10( c( min( parameters$myP_prctle ), max( parameters$myP_prctle ) ) ),
+                    ylim = c( 0, parameters$neglog10max )
+                )
+
+                counter = 1
+
+                for ( P_prctle in parameters$myP_prctle ) {
+                    cat( "==========> performing binomial proportion test for Top ", P_prctle*100, "%..\n", sep = "" )
+                    bpt.filename <- paste( parameters$outprefix,
+                        sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                        "BPT", format( P_prctle, scientific = 4 ),
+                        "table.txt", sep = "_" )
+                    if ( parameters$verbose ) {
+                        cat( "call of perform_bpt() with arguments:\n" )
+                        cat( "mydata =\n" ); print( head( mydata ) )
+                        cat( "myannot =\n" ); print( head( myannot ) )
+                        cat( "myctrlannot =\n" ); print( head( myctrlannot ) )
+                        cat( "myfilter =\n" ); print( head( filter.array ) )
+                        cat( "mybreaks = " ); print( parameters$mybreaks )
+                        cat( "numof.breaks = " ); print( parameters$numof.breaks )
+                        cat( "P_prctle = " ); print( P_prctle )
+                    }
+                    mybpt.list <- perform_bpt( mydata, myannot, myctrlannot, parameters, filter.array, P_prctle )
+                    mybpt.table <- mybpt.list$summary
+                    if ( counter == 1 ) { # set stuff up
+                        mycolnames <- colnames( mybpt.table )
+                        myrownames <- rownames( mybpt.table )
+                        key.names <- paste(rep(mycolnames, each = length( myrownames )), myrownames) # plot lines
+                        if( length( mycolnames ) <= 1 ) {
+                            key.points <- rep( 16, each = length( myrownames ) )
+                        } else key.points <- rep( c( 16, 6, 2 ), each = length( myrownames ) )
+                        key.colors <- rep(
+                            mycolorfunction( 1:length( myrownames ), length( myrownames ), parameterstmp$figure.colors ),
+                            max( length( mycolnames ), 1 )
+                        )
+                        mycolnames[ 1 ] <- paste( paste( annotation.name, "strata", sep = "_" ), "[=]" )
+                        myx.data <- matrix( ncol = length( parameters$myP_prctle ), nrow = length( mybpt.table ) )
+                        myy.data <- matrix( ncol = length( parameters$myP_prctle ), nrow = length( mybpt.table ) )
+                    }
+                    write.table( format( mybpt.table, digits = 2, scientific = T, quote = F ),
+                        file = bpt.filename, quote = F, col.names = mycolnames, na = "-", sep = "\t" )
+                    myx.data[, which( parameters$myP_prctle == P_prctle ) ] <- rep( log10( P_prctle ), length( mybpt.table ) )
+                    myy.data[, which( parameters$myP_prctle == P_prctle ) ] <- -log10( c( mybpt.table ) + parameters$tiny )
+                    counter = counter + 1
+                }
+
+# 					exclusion_list <- c( # not in the plot
+# 						paste( "[>] ", get_qlabel(), "_", length( myrownames ), sep = "" ),
+# 						paste( "[>] ", get_qlabel(), "_", length( myrownames ) - 1, sep = "" ),
+# 						paste( "[<] ", get_qlabel(), "_", 1, sep = "" ),
+# 						paste( "[<] ", get_qlabel(), "_", 2, sep = "" )
+# 					)
+                exclusion_list <- c( # not in the plot
+                    paste( "[>]", myrownames[ length( myrownames ) ] ),
+                    paste( "[>]", myrownames[ length( myrownames ) - 1 ] ),
+                    paste( "[<]", myrownames[ 1 ] ),
+                    paste( "[<]", myrownames[ 2 ] )
+                )
+
+                for ( k in 1 : length( key.names ) ) {
+                    if ( ! key.names[ k ] %in% exclusion_list ) {
+                        lines(
+                            x = myx.data[ k, !is.na( myy.data[ k, ] ) ],
+                            y = myy.data[ k, !is.na( myy.data[ k, ] ) ],
+                            col = key.colors[ k ],
+                            pch = key.points[ k ],
+                            type = "b",
+                            cex = 1.5
+                        )
+                    }
+                }
+
+                # multiple tests significance lines
+                abline( a = 2, b = 0, col = 'gray', lwd = 1.5, lty = 2 )
+                abline( a = -log10( 0.05 ), b = 0, col = 'lightgray', lwd = 1.5, lty = 2 )
+
+                title(
+                    main = paste( sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name ),
+                    xlab = "phenotype lowest p-value log10(percentile)",
+                    ylab = "Test -log10(p-value)"
+                )
+                axis( 1, at=log10(parameters$myP_prctle), labels=paste0("Top ", parameters$myP_prctle*100, "%") )
+                axis( 2, at=seq(0, parameters$neglog10max, length.out = parameters$N_ytics) )
+
+                mykeys <- ! key.names %in% exclusion_list
+
+                legend(
+                    "topleft",
+        #             inset = c( -0.25, 0 ),
+                    key.names[ mykeys ],
+                    pch = key.points[ mykeys ],
+                    col = key.colors[ mykeys ],
+                    pt.cex = 1.5,
+                    xpd = T
+                )
+
+                dev.off()
+
+            }
+
+            if ( parameters$do_perform_hgt ) {
+
+                pdf( paste( parameters$outprefix,
+                    sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                    "FT.pdf", sep = "_" ) )
+                par( mar = c( 5, 5, 5, 2 ) )
+                # set plot area up
+                plot( NULL,
+                    cex = 1.5,
+                    xaxt = "n", yaxt = "n",
+                    xlab = "", ylab = "",
+                    xlim = log10( c( min( parameters$myP_prctle ), max( parameters$myP_prctle ) ) ),
+                    ylim = c( 0, parameters$neglog10max )
+                )
+
+                counter = 1
+
+                for ( P_prctle in parameters$myP_prctle ) {
+                    cat( "==========> performing Fisher test for Top ", P_prctle*100, "%..\n", sep = "" )
+                    hgte.filename <- paste( parameters$outprefix,
+                        sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                        "FTe", format( P_prctle, scientific = 4 ),
+                        "table.txt", sep = "_" )
+                    hgtp.filename <- paste( parameters$outprefix,
+                        sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name,
+                        "FTp", format( P_prctle, scientific = 4 ),
+                        "table.txt", sep = "_" )
+                    if ( parameters$verbose ) {
+                        cat( "call of perform_hgt() with arguments:\n" )
+                        cat( "mydata =\n" ); print( head( mydata ) )
+                        cat( "myannot =\n" ); print( head( myannot ) )
+                        cat( "myctrlannot =\n" ); print( head( myctrlannot ) )
+                        cat( "myfilter =\n" ); print( head( filter.array ) )
+                        cat( "mybreaks = " ); print( parameters$mybreaks )
+                        cat( "numof.breaks = " ); print( parameters$numof.breaks )
+                        cat( "P_prctle = " ); print( P_prctle )
+                    }
+                    myhgt.list <- perform_hgt( mydata, myannot, myctrlannot, parameters, filter.array, P_prctle )
+                    myhgte.table <- myhgt.list$summary
+                    myhgtp.table <- myhgt.list$pvalues
+                    if ( counter == 1 ) { # set stuff up
+                        mycolnames <- colnames( myhgte.table )
+                        myrownames <- rownames( myhgte.table )
+                        key.names <- paste(rep(mycolnames, each = length( myrownames )), myrownames) # plot lines
+                        if( length( mycolnames ) <= 1 ) {
+                            key.points <- rep( 16, each = length( myrownames ) )
+                        } else key.points <- rep( c( 16, 6, 2 ), each = length( myrownames ) )
+                        key.colors <- rep(
+                            mycolorfunction( 1:length( myrownames ), length( myrownames ), parameterstmp$figure.colors ),
+                            max( length( mycolnames ), 1 )
+                        )
+                        mycolnames[ 1 ] <- paste( paste( annotation.name, "strata", sep = "_" ), "[=]" )
+                        myx.data <- matrix( ncol = length( parameters$myP_prctle ), nrow = length( myhgtp.table ) )
+                        myy.data <- matrix( ncol = length( parameters$myP_prctle ), nrow = length( myhgtp.table ) )
+                    }
+                    write.table( format( myhgte.table, digits = 2, quote = F ),
+                        file = hgte.filename, quote = F, col.names = mycolnames, na = "-", sep = "\t" )
+                    write.table( format( myhgtp.table, digits = 2, scientific = T, quote = F ),
+                        file = hgtp.filename, quote = F, col.names = mycolnames, na = "-", sep = "\t" )
+                    myx.data[, which( parameters$myP_prctle == P_prctle ) ] <- rep( log10( P_prctle ), length( myhgtp.table ) )
+                    myy.data[, which( parameters$myP_prctle == P_prctle ) ] <- -log10( c( myhgtp.table ) + parameters$tiny )
+                    counter = counter + 1
+                }
+
+# 					exclusion_list <- c( # not in the plot
+# 						paste( "[>] ", get_qlabel(), "_", length( myrownames ), sep = "" ),
+# 						paste( "[>] ", get_qlabel(), "_", length( myrownames ) - 1, sep = "" ),
+# 						paste( "[<] ", get_qlabel(), "_", 1, sep = "" ),
+# 						paste( "[<] ", get_qlabel(), "_", 2, sep = "" )
+# 					)
+                exclusion_list <- c( # not in the plot
+                    paste( "[>]", myrownames[ length( myrownames ) ] ),
+                    paste( "[>]", myrownames[ length( myrownames ) - 1 ] ),
+                    paste( "[<]", myrownames[ 1 ] ),
+                    paste( "[<]", myrownames[ 2 ] )
+                )
+
+                for ( k in 1 : length( key.names ) ) {
+                    if ( ! key.names[ k ] %in% exclusion_list ) {
+                        lines(
+                            x = myx.data[ k, !is.na( myy.data[ k, ] ) ],
+                            y = myy.data[ k, !is.na( myy.data[ k, ] ) ],
+                            col = key.colors[ k ],
+                            pch = key.points[ k ],
+                            type = "b",
+                            cex = 1.5
+                        )
+                    }
+                }
+
+                # multiple tests significance lines
+                abline( a = 2, b = 0, col = 'gray', lwd = 1.5, lty = 2 )
+                abline( a = -log10( 0.05 ), b = 0, col = 'lightgray', lwd = 1.5, lty = 2 )
+
+                title(
+                    main = paste( sub( '(.RData|.txt)$', '', basename(data.file) ), annotation.name ),
+                    xlab = "phenotype lowest p-value log10(percentile)",
+                    ylab = "Test -log10(p-value)"
+                )
+                axis( 1, at=log10(parameters$myP_prctle), labels=paste0("Top ", parameters$myP_prctle*100, "%") )
+                axis( 2, at=seq(0, parameters$neglog10max, length.out = parameters$N_ytics) )
+
+                mykeys <- ! key.names %in% exclusion_list
+
+                legend(
+                    "topleft",
+        #             inset = c( -0.25, 0 ),
+                    key.names[ mykeys ],
+                    pch = key.points[ mykeys ],
+                    col = key.colors[ mykeys ],
+                    pt.cex = 1.5,
+                    xpd = T
+                )
+
+                dev.off()
+
+            }
+
+        }
+                                
+        if ( parameters$do_draw_bs_plots ) {
+            mycolors = mycolorfunction(1:dim(myresiduals_mean)[2], dim(myresiduals_mean)[2], parameters$figure.colors)
+            mybcolors = rgb( t(col2rgb(mycolors)), alpha = 125, maxColorValue = 255 )
+            # TODO?: maybe the residuals need be scaled (variance=2?) beforehand
+            myresiduals_var[ myresiduals_var == 0 ] = max(myresiduals_var, na.rm=T) + 2
+            matplot( mybsannot_mids, myresiduals_mean, type = 'n', ylim = c(-2,8),
+                xlab = sub( '(.RData|.txt)$', '', basename(parameters$bsannotation.file) ), ylab = "squared z-score residuals" )
+# #             suppressWarnings( arrows( mybsannot_mids, myresiduals_mean - sqrt( myresiduals_var ),
+# #                 mybsannot_mids, myresiduals_mean + sqrt( myresiduals_var ), length = 0.1, angle=90, code=3,
+# #                 col=rep(mybcolors, each=dim(myresiduals_mean)[2]) ) )
+#             for ( aj in 1:dim(myresiduals_mean)[2] ) {
+#                 tmp.frame = data.frame( x = mybsannot_mids, y = myresiduals_mean[,aj] )
+#                 mybslm = lm( y ~ x, data = tmp.frame, weights = 1/myresiduals_var[,aj] )
+#                 mybslm.coeff = summary( mybslm )$coefficients
+# #                 if ( mybslm.coeff[1,4] < 0.001 ) {
+# #                     cat( 'p =', mybslm.coeff[1,4], ';', 'forcing weak zero..\n' )
+# # #                     cat( 'p =', mybslm.coeff[1,4], ';', 'forcing strong zero..' )
+# #                     tmp.frame = data.frame( x = c(0, mybsannot_mids), y = c(0, myresiduals_mean[,aj]) )
+# #                     mybslm = lm( y ~ x, data = tmp.frame, weights = c( 1/mean(myresiduals_var, na.rm=T), 1/myresiduals_var[,aj] ) )
+# # #                     mybslm = lm( y ~ x, data = tmp.frame, weights = c( 1/min(myresiduals_var, na.rm=T), 1/myresiduals_var[,aj] ) )
+# # #                     mybslm = lm( myresiduals_mean[,aj] ~ mybsannot_mids + 0, weights = 1/myresiduals_var[,aj] )
+# #                 } else cat( 'p =', mybslm.coeff[1,4], '\n' )
+#                 mybsannot_seq = seq( min(mybsannot_mids), max(mybsannot_mids), length.out = 1000 )
+#                 myresiduals_pred = predict( mybslm, newdata = data.frame(x = mybsannot_seq), interval = 'confidence' )
+#                 polygon( c( rev(mybsannot_seq), mybsannot_seq ), c( rev(myresiduals_pred[,3]), myresiduals_pred[,2] ), col=mybcolors[aj], border=NA )
+#                 abline( a = mybslm$coefficients[1], b = mybslm$coefficients[2], lty=2, col=mycolors[aj] )
+#             }
+            matpoints( mybsannot_mids, myresiduals_mean, col = mycolors, pch = 16 )
+            legend( 'topleft', legend=sub( '(.RData|.txt)$', '', basename(parameters$annotation.files) ), pch=16, col=mycolors )
+            title( mypheno )
+            dev.off()
+        }
+
+	}
+
+	if ( parameters$verbose ) {
+		dataname <- paste( parameters$outprefix, ".RData", sep = "" )
+		save.image( file = dataname )
+	}
+
+} else if ( !parameters$helpme ) {
+
+	cat( "\nyou may have neglected to provide input.\n" )
+	parameters$helpme <- TRUE
+
+}
+
+if ( parameters$helpme ) {
+
+	print_help_message( parameters )
+
+}
+
