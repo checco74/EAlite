@@ -3,6 +3,7 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
     myfilter.full = NULL)
 {
     plottype = "l"
+	defcolor = "#999999"
     library(Hmisc, quietly = T, warn.conflicts = F)
     if (!is.null(mydata.full) && !is.null(myannot.full)) {
         neglog10_P_threshold <- 24
@@ -42,7 +43,7 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
         binconftemp_all <- binconftemp_all[datafilter, ]
         cat("plotting masters..\n")
         plot(datapoints, rep(1, max(10, length(datapoints))),
-            type = plottype, lty = 2, lwd = 1.5, pch = 16, cex = 0.5, col = "#777777",
+            type = plottype, lty = 2, lwd = 1.5, pch = 16, cex = 0.5, col = defcolor,
             log = "y", xlab = "Nominal -log10(p)", ylab = "Fold enrichment",
             xlim = c(0, 8), ylim = c(0.1, 10))
         cat("plotting additional points..\n")
@@ -77,7 +78,7 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
         cat("writing legends..\n")
         legend("topleft", c("all SNPs", myannotq_levels),
 			lwd = c(rep(2, length(myannotq_levels) + 1)), bg = "white",
-            col = c("#777777", mycolors[1:length(myannotq_levels)]))
+            col = c(defcolor, mycolors[1:length(myannotq_levels)]))
     }
     else {
         return(NULL)
