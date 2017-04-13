@@ -188,7 +188,7 @@ if ( length( parameters$pheno.files ) > 0 && !parameters$helpme ) {
             N_levels <- length( levels(as.factor(myannotq)) )
             tt = seq( 0, 1, length.out=N_levels )
             mybasecolor = mycolorfunction(aj, length(parameters$annotation.files), parameters$figure.colors)
-            parameterstmp$figure.colors = rgb( t(col2rgb(mybasecolor)), alpha = pmax(10, tt*255), maxColorValue = 255 )
+            parameterstmp$figure.colors = rgb( t(col2rgb(mybasecolor)), alpha = pmax(55, (1.-tt)*255), maxColorValue = 255 )
 
             if ( parameters$do_compute_fdr ) {
 
