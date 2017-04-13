@@ -3,6 +3,7 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
     myfilter.full = NULL)
 {
     plottype = "l"
+	defcolor = "#999999"
     library(Hmisc, quietly = T, warn.conflicts = F)
     if (!is.null(mydata.full) && !is.null(myannot.full)) {
         neglog10_P_threshold <- 24
@@ -42,7 +43,7 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
         binconftemp_all <- binconftemp_all[datafilter, ]
         cat("plotting masters..\n")
         qqplot(-log10(1 - binconftemp_all[, 1]), datapoints,
-            type = plottype, lwd = 2, pch = 16, cex = 0.5, col = "#777777",
+            type = plottype, lwd = 2, pch = 16, cex = 0.5, col = defcolor,
             xlab = "Empirical -log10(p)", ylab = "Nominal -log10(p)",
             xlim = c(0, 6), ylim = c(0, 8))
         if (myparameters$do_draw_cis) {
@@ -84,7 +85,7 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
         abline(a = -log10(gws.level), b = 0, col = "lightblue", lwd = 2, lty = 3)
         legend("topleft", c("all SNPs", myannotq_levels),
 			lwd = c(rep(2, length(myannotq_levels) + 1)), bg = "white",
-            col = c("#777777", mycolors[1:length(myannotq_levels)])
+            col = c(defcolor, mycolors[1:length(myannotq_levels)])
 		)
         legend("bottomright", c("Expected under null", paste("p = ", format(gws.level))),
 			lty = c(2, 3), lwd = 2, bg = "white", col = c("lightgray", "lightblue"))
