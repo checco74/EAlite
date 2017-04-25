@@ -4,8 +4,8 @@
 
 Get GIT repository: 
 ```
-git clone https://github.com/checco74/EAtestslite
-cd EAtestslite
+git clone https://github.com/checco74/EAlite
+cd EAlite
 ```
 
 Install EAtestslite R-package:
