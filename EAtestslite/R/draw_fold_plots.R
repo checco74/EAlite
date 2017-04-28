@@ -19,7 +19,7 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
         if ( is.null( myfilter.full ) ) {
             myfilter = array( TRUE, dim = c( length( mydata ), 1 ) )
         } else { myfilter = myfilter.full[myorder,] }
-        # fileter NA values
+        # filter NA values
         mymask <- !is.na(mydata) & !is.na(myannot)
         mydata <- mydata[mymask]
         myannot <- myannot[mymask]
