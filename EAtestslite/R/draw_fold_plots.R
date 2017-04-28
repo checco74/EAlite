@@ -19,23 +19,31 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
         if ( is.null( myfilter.full ) ) {
             myfilter = array( TRUE, dim = c( length( mydata ), 1 ) )
         } else { myfilter = myfilter.full[myorder,] }
+        # fileter NA values
         mymask <- !is.na(mydata) & !is.na(myannot)
         mydata <- mydata[mymask]
         myannot <- myannot[mymask]
         myfilter = myfilter[mymask,]
         myorder <- myorder[mymask]
+        # convert p-values to negative log scale [0,inf]
         neglog10_P_all <- -log10(mydata)
         if (myparameters$verbose) {
             print("draw_qq_plots() neglog10_P_all:")
             print(summary(neglog10_P_all))
         }
         n_all = length(neglog10_P_all)
+        # bin data for plots, so they don't get too heavy
+        num_datapoints <- 1000
         histobreaks = seq(
             min(0, floor(min(neglog10_P_all, na.rm = TRUE))),
             ceiling(max(neglog10_P_all, na.rm = TRUE)),
-            length.out = 1000
+            length.out = num_datapoints
         )
+        # make hist for the whole data set (this will span the whole possible range of values)
         histotemp_all <- hist(neglog10_P_all, breaks = histobreaks, plot = FALSE)
+        # cumulative sum of histogram bin counts (bin1, bin1+bin2, bin1+bin2+bin3, ...)
+        # this is cumulative on negative logarithm of p, i.e. from uninteresting p values to
+        # interesting p values
         cdftemp_all <- cumsum(histotemp_all$counts)
         datafilter <- histotemp_all$mids < -log10(gws.level) | histotemp_all$counts > 1
         datapoints <- histotemp_all$mids[datafilter]
@@ -57,15 +65,22 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
             neglog10_P <- -log10(mydata[myannotq == myannotq_levels[k]])
             neglog10_P <- neglog10_P[!is.na(neglog10_P)]
             n = length(neglog10_P)
+            # make hist for the stratum
             histotemp <- hist(neglog10_P, breaks = histobreaks, plot = FALSE)
+            # cumulative sum of histogram bin counts (bin1, bin1+bin2, bin1+bin2+bin3, ...)
+            # this is cumulative on negative logarithm of p, i.e. from uninteresting p values to
+            # interesting p values
             cdftemp <- cumsum(histotemp$counts)
             binconftemp <- binconf(cdftemp, n, method = "exact")
             binconftemp <- binconftemp[datafilter, ]
+            # we plot (1 - binconftemp) ratios because we want to emphasize the fold enrichment on
+            # the interesting end of the p value spectrum
             if (length(-log10(1 - binconftemp[, 1])) > 0 && length(datapoints) > 0 && 
                 length(-log10(1 - binconftemp[, 1])) == length(datapoints)) {
                 foldtemp <- (1 - binconftemp[, 1])/(1 - binconftemp_all[,1] + tiny)
                 points(datapoints, foldtemp, type = plottype,
                   lwd = 2, col = mycolors[k], pch = 16)
+                # draw confidence intervals?
                 if (myparameters$do_draw_cis) {
                   foldtemp_2 <- (1 - binconftemp[, 2])/(1 - binconftemp_all[,2] + tiny)
                   foldtemp_3 <- (1 - binconftemp[, 3])/(1 - binconftemp_all[,3] + tiny)
