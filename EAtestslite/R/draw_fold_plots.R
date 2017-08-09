@@ -7,7 +7,6 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
     if (is.null(mydata.full) || is.null(myannot.full)) {
         return(NULL)
     }
-    
     pd <- get_plot_data(pvals=mydata.full, 
                         annot=myannot.full, 
                         breaks=myparameters$mybreaks, 
@@ -42,14 +41,15 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
 get_plot_data <- 
 function(pvals, annot, filter=NULL, breaks='auto', numof.breaks=4, verbose=T) 
 {
+    # data structure to store plot data
     pd <- NULL
-    pd$datapoints <- NULL
-    pd$folds      <- list()
+    pd$datapoints <- NULL   # x values
+    pd$folds      <- list() # list of y values
     # example for list elements  
-    # pd$folds[[i]]$y      <- NULL 
-    # pd$folds[[i]]$ci0    <- NULL
-    # pd$folds[[i]]$ci1    <- NULL
-    # pd$folds[[i]]$name   <- NULL
+    # pd$folds[[i]]$y      <- NULL # y value
+    # pd$folds[[i]]$ci0    <- NULL # confidence interval starts
+    # pd$folds[[i]]$ci1    <- NULL # confidence interval ends
+    # pd$folds[[i]]$name   <- NULL # name of annotation
 
     library(Hmisc, quietly = T, warn.conflicts = F)
     neglog10_P_threshold <- 24
