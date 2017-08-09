@@ -10,7 +10,8 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
     pd <- get_plot_data(pvals=mydata.full, 
                         annot=myannot.full, 
                         breaks=myparameters$mybreaks, 
-                        numof.breaks=myparameters$numof.breaks)
+                        numof.breaks=myparameters$numof.breaks
+                        verbose=myparameters$verbose)
     cat("plotting masters..\n")
     plot(pd$datapoints, rep(1, max(10, length(pd$datapoints))),
         type = plottype, lty = 2, lwd = 1.5, pch = 16, cex = 0.5, col = defcolor,
