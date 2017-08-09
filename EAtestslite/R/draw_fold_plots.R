@@ -10,8 +10,9 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
     pd <- get_plot_data(pvals=mydata.full, 
                         annot=myannot.full, 
                         breaks=myparameters$mybreaks, 
-                        numof.breaks=myparameters$numof.breaks
-                        verbose=myparameters$verbose)
+                        numof.breaks=myparameters$numof.breaks,
+                        verbose=myparameters$verbose,
+                        logfunc=base::cat)
     cat("plotting masters..\n")
     plot(pd$datapoints, rep(1, max(10, length(pd$datapoints))),
         type = plottype, lty = 2, lwd = 1.5, pch = 16, cex = 0.5, col = defcolor,
@@ -40,7 +41,7 @@ function (mydata.full = NULL, myannot.full = NULL, myparameters = init_parameter
 
 
 get_plot_data <- 
-function(pvals, annot, filter=NULL, breaks='auto', numof.breaks=4, verbose=T) 
+function(pvals, annot, filter=NULL, breaks='auto', numof.breaks=4, verbose=T, logfunc=NA) 
 {
     # data structure to store plot data
     pd <- NULL
@@ -55,10 +56,13 @@ function(pvals, annot, filter=NULL, breaks='auto', numof.breaks=4, verbose=T)
     library(Hmisc, quietly = T, warn.conflicts = F)
     neglog10_P_threshold <- 24
     tiny <- 1e-72
-    cat("p-value genome-wide significance level is set to: ")
+    if (is.na(logfunc)) {
+        logfunc=function(...){}
+    }
+    logfunc("p-value genome-wide significance level is set to: ")
     gws.level <- max(5e-08, 0.05/sum(!is.na(pvals)))
-    cat(gws.level, "\n")
-    if (verbose) cat("setting temporary data storage tables..\n")
+    logfunc(gws.level, "\n")
+    if (verbose) logfunc("setting temporary data storage tables..\n")
     myorder = order(pvals)
     mydata <- pvals[myorder]
     myannot <- annot[myorder]
@@ -102,7 +106,7 @@ function(pvals, annot, filter=NULL, breaks='auto', numof.breaks=4, verbose=T)
     for (k in 1:length(myannotq_levels)) {
         fold <- NULL
         fold$name <- as.character(myannotq_levels[k])
-        cat("calc ", 'I', k, "..\n", sep = "")
+        logfunc(paste("calc ", 'I', k, "..\n", sep = ""))
         neglog10_P <- -log10(mydata[myannotq == myannotq_levels[k]])
         neglog10_P <- neglog10_P[!is.na(neglog10_P)]
         n = length(neglog10_P)
@@ -123,7 +127,7 @@ function(pvals, annot, filter=NULL, breaks='auto', numof.breaks=4, verbose=T)
             fold$ci0 <- (1 - binconftemp[, 2])/(1 - binconftemp_all[,2] + tiny)
             fold$ci1 <- (1 - binconftemp[, 3])/(1 - binconftemp_all[,3] + tiny)
         }
-        else cat("warning: degenerate", 'I', k, "\n")
+        else logfunc(paste("warning: degenerate", 'I', k, "\n"))
         pd$folds[[k]] <- fold
     }
     pd
