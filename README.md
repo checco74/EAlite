@@ -4,7 +4,7 @@
 
 Get GIT repository: 
 ```
-git clone https://github.com/checco74/EAlite
+git clone https://github.com/scimerc/EAlite
 cd EAlite
 ```
 
